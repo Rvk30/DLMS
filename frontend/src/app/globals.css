@@ -1,0 +1,109 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 97.6%;
+    --foreground: 0 0% 17.6%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 17.6%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 17.6%;
+    --primary: 213 52% 24%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 35 91% 55%;
+    --secondary-foreground: 213 52% 24%;
+    --muted: 210 20% 95%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 20% 95%;
+    --accent-foreground: 213 52% 24%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 20% 90%;
+    --input: 214 20% 90%;
+    --ring: 213 52% 24%;
+    --radius: 0.5rem;
+  }
+
+  * { @apply border-border; }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  }
+  html { scroll-behavior: smooth; }
+}
+
+@layer components {
+  /* Sidebar */
+  .sidebar-link {
+    @apply flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200;
+    @apply text-blue-200 hover:bg-white/10 hover:text-white;
+  }
+  .sidebar-link.active {
+    @apply bg-brand-gold text-brand-navy font-semibold shadow;
+  }
+
+  /* Page header */
+  .page-header {
+    @apply flex items-center justify-between mb-6;
+  }
+  .page-title {
+    @apply text-2xl font-bold text-brand-navy;
+  }
+
+  /* Stats card */
+  .stat-card {
+    @apply bg-white rounded-xl p-5 shadow-card hover:shadow-card-hover transition-shadow duration-200 animate-fade-in;
+  }
+
+  /* Data table */
+  .data-table { @apply w-full text-sm; }
+  .data-table th {
+    @apply text-left px-4 py-3 bg-muted text-muted-foreground font-semibold text-xs uppercase tracking-wider;
+  }
+  .data-table td { @apply px-4 py-3 border-b border-border; }
+  .data-table tr:hover td { @apply bg-muted/40; }
+  .data-table tr:last-child td { @apply border-0; }
+
+  /* Status badges */
+  .badge-issued   { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800; }
+  .badge-returned { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800; }
+  .badge-overdue  { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-800; }
+  .badge-pending  { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-800; }
+  .badge-available{ @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800; }
+
+  /* Form input */
+  .form-input {
+    @apply w-full px-4 py-2.5 rounded-lg border border-border bg-white text-sm transition-colors;
+    @apply focus:outline-none focus:ring-2 focus:ring-brand-navy/30 focus:border-brand-navy;
+  }
+  .form-label { @apply block text-sm font-medium text-foreground mb-1.5; }
+
+  /* Buttons */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold;
+    @apply bg-brand-navy text-white hover:bg-brand-navy-light active:bg-brand-navy-dark transition-colors;
+    @apply disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold;
+    @apply bg-brand-gold text-brand-navy hover:bg-brand-gold-light transition-colors;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium;
+    @apply bg-transparent hover:bg-muted text-foreground transition-colors;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold;
+    @apply bg-red-600 text-white hover:bg-red-700 transition-colors;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { @apply bg-muted; }
+::-webkit-scrollbar-thumb { @apply bg-muted-foreground/30 rounded-full; }
+::-webkit-scrollbar-thumb:hover { @apply bg-muted-foreground/50; }

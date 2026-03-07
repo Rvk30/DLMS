@@ -1,0 +1,239 @@
+import { prisma } from '../config/database';
+import { AppError } from '../utils/AppError';
+import { TransactionStatus } from '../types';
+import type { IssueBookDTO, ReturnBookDTO } from '../types';
+
+const MAX_BORROW_LIMIT = Number(process.env.MAX_BORROW_LIMIT) || 3;
+const LOAN_DAYS = 14; // default loan period
+
+export class TransactionService {
+    // ── Issue Book ────────────────────────────────────────────────────────────
+    async issue(dto: IssueBookDTO, issuedById: string) {
+        // 1. Fetch student, book, and librarian in parallel
+        const [student, book] = await Promise.all([
+            prisma.student.findUnique({
+                where: { id: dto.studentId },
+                include: { account: true },
+            }),
+            prisma.book.findUnique({ where: { id: dto.bookId } }),
+        ]);
+
+        if (!student) throw AppError.notFound('Student not found.');
+        if (!book) throw AppError.notFound('Book not found.');
+
+        // 2. Account status check
+        if (student.account?.status === 'SUSPENDED') {
+            throw AppError.forbidden('Student account is suspended due to unpaid fines.');
+        }
+
+        // 3. Borrow limit check
+        if (student.borrowedCount >= MAX_BORROW_LIMIT) {
+            throw AppError.badRequest(
+                `Maximum borrow limit of ${MAX_BORROW_LIMIT} books reached. Please return a book first.`
+            );
+        }
+
+        // 4. Availability check
+        if (book.availableCopies <= 0) {
+            throw AppError.badRequest(`"${book.title}" is currently unavailable.`);
+        }
+
+        // 5. Check if student already has this book
+        const alreadyIssued = await prisma.transaction.findFirst({
+            where: { studentId: dto.studentId, bookId: dto.bookId, status: { in: ['ISSUED', 'OVERDUE'] } },
+        });
+        if (alreadyIssued) throw AppError.conflict('Student already has this book issued.');
+
+        // Calculate due date
+        const dueDate = dto.dueDate
+            ? new Date(dto.dueDate)
+            : new Date(Date.now() + LOAN_DAYS * 24 * 60 * 60 * 1000);
+
+        // 6. Atomic transaction: create transaction record + update book + update student
+        const [transaction] = await prisma.$transaction([
+            prisma.transaction.create({
+                data: {
+                    studentId: dto.studentId,
+                    bookId: dto.bookId,
+                    issuedById,
+                    dueDate,
+                    remarks: dto.remarks,
+                    status: TransactionStatus.ISSUED,
+                },
+                include: {
+                    book: true,
+                    student: { include: { user: { select: { name: true, email: true } } } },
+                },
+            }),
+            prisma.book.update({
+                where: { id: dto.bookId },
+                data: {
+                    availableCopies: { decrement: 1 },
+                    status: book.availableCopies - 1 === 0
+                        ? 'ISSUED'
+                        : 'AVAILABLE',
+                },
+            }),
+            prisma.student.update({
+                where: { id: dto.studentId },
+                data: { borrowedCount: { increment: 1 } },
+            }),
+            prisma.account.update({
+                where: { studentId: dto.studentId },
+                data: {
+                    totalBorrowed: { increment: 1 },
+                    currentlyBorrowed: { increment: 1 },
+                },
+            }),
+        ]);
+
+        return transaction;
+    }
+
+    // ── Return Book ───────────────────────────────────────────────────────────
+    async return(dto: ReturnBookDTO, returnedById: string) {
+        const transaction = await prisma.transaction.findUnique({
+            where: { id: dto.transactionId },
+            include: { book: true, student: true, fine: true },
+        });
+
+        if (!transaction) throw AppError.notFound('Transaction not found.');
+        if (transaction.status === TransactionStatus.RETURNED) {
+            throw AppError.badRequest('Book has already been returned.');
+        }
+
+        const returnDate = new Date();
+        const isOverdue = returnDate > transaction.dueDate;
+
+        // Calculate fine if overdue
+        let fine = null;
+        if (isOverdue) {
+            const daysOverdue = Math.ceil(
+                (returnDate.getTime() - transaction.dueDate.getTime()) / (1000 * 60 * 60 * 24)
+            );
+            const ratePerDay = Number(process.env.FINE_PER_DAY) || 2;
+            const totalAmount = daysOverdue * ratePerDay;
+
+            fine = await prisma.fine.upsert({
+                where: { transactionId: dto.transactionId },
+                update: { daysOverdue, totalAmount },
+                create: {
+                    transactionId: dto.transactionId,
+                    studentId: transaction.studentId,
+                    daysOverdue,
+                    ratePerDay,
+                    totalAmount,
+                    status: 'PENDING',
+                },
+            });
+        }
+
+        // Atomic update: transaction + book + student + account
+        await prisma.$transaction([
+            prisma.transaction.update({
+                where: { id: dto.transactionId },
+                data: {
+                    status: TransactionStatus.RETURNED,
+                    returnDate,
+                    returnedById,
+                    remarks: dto.remarks,
+                },
+            }),
+            prisma.book.update({
+                where: { id: transaction.bookId },
+                data: {
+                    availableCopies: { increment: 1 },
+                    status: 'AVAILABLE',
+                },
+            }),
+            prisma.student.update({
+                where: { id: transaction.studentId },
+                data: { borrowedCount: { decrement: 1 } },
+            }),
+            prisma.account.update({
+                where: { studentId: transaction.studentId },
+                data: {
+                    totalReturned: { increment: 1 },
+                    currentlyBorrowed: { decrement: 1 },
+                    ...(fine ? {
+                        totalFineAccrued: { increment: fine.totalAmount },
+                        outstandingFine: { increment: fine.totalAmount },
+                    } : {}),
+                },
+            }),
+        ]);
+
+        return { transaction, fine, daysOverdue: fine?.daysOverdue ?? 0 };
+    }
+
+    // ── History ───────────────────────────────────────────────────────────────
+    async getHistory(userId: string, role: string, query: any) {
+        const page = Math.max(1, Number(query.page) || 1);
+        const limit = Math.min(50, Number(query.limit) || 10);
+        const skip = (page - 1) * limit;
+
+        const where: any = {};
+
+        // Students can only see their own history
+        if (role === 'STUDENT') {
+            const student = await prisma.student.findUnique({ where: { userId } });
+            if (!student) throw AppError.notFound('Student profile not found.');
+            where.studentId = student.id;
+        }
+
+        if (query.status) where.status = query.status;
+        if (query.studentId && role === 'LIBRARIAN') where.studentId = query.studentId;
+        if (query.bookId) where.bookId = query.bookId;
+
+        const [transactions, total] = await Promise.all([
+            prisma.transaction.findMany({
+                where,
+                skip,
+                take: limit,
+                orderBy: { createdAt: 'desc' },
+                include: {
+                    book: { select: { title: true, author: true, isbn: true } },
+                    student: { include: { user: { select: { name: true, email: true } } } },
+                    fine: true,
+                },
+            }),
+            prisma.transaction.count({ where }),
+        ]);
+
+        return { transactions, total, page, limit };
+    }
+
+    // ── Mark Overdues (cron-compatible) ──────────────────────────────────────
+    async markOverdueTransactions(): Promise<number> {
+        const now = new Date();
+        const result = await prisma.transaction.updateMany({
+            where: { status: TransactionStatus.ISSUED, dueDate: { lt: now } },
+            data: { status: TransactionStatus.OVERDUE },
+        });
+
+        // Create/update fines for newly overdue items
+        const overdueTransactions = await prisma.transaction.findMany({
+            where: { status: TransactionStatus.OVERDUE },
+        });
+
+        for (const t of overdueTransactions) {
+            const daysOverdue = Math.ceil((now.getTime() - t.dueDate.getTime()) / (1000 * 60 * 60 * 24));
+            const ratePerDay = Number(process.env.FINE_PER_DAY) || 2;
+            await prisma.fine.upsert({
+                where: { transactionId: t.id },
+                update: { daysOverdue, totalAmount: daysOverdue * ratePerDay },
+                create: {
+                    transactionId: t.id,
+                    studentId: t.studentId,
+                    daysOverdue,
+                    ratePerDay,
+                    totalAmount: daysOverdue * ratePerDay,
+                },
+            });
+        }
+
+        return result.count;
+    }
+}
+
+export const transactionService = new TransactionService();
