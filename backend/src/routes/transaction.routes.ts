@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { body, query, param } from 'express-validator';
 import { transactionController } from '../controllers/transaction.controller';
 import { validate } from '../middleware/validate.middleware';
-import { authenticate, librarianOnly, anyRole } from '../middleware/auth.middleware';
+import { authenticate, librarianOnly, studentOnly, anyRole } from '../middleware/auth.middleware';
 
 const router = Router();
 router.use(authenticate);
@@ -18,6 +18,17 @@ router.post(
     ],
     validate,
     transactionController.issue,
+);
+
+// ─── POST /api/transactions/borrow  (student only) ─────────────────────────
+router.post(
+    '/borrow',
+    studentOnly,
+    [
+        body('bookId').isUUID().withMessage('Valid book ID required.'),
+    ],
+    validate,
+    transactionController.borrow,
 );
 
 // ─── POST /api/transactions/return  (librarian only) ──────────────────────

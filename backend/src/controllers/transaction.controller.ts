@@ -10,6 +10,16 @@ export class TransactionController {
         } catch (err) { next(err); }
     };
 
+    borrow = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+        try {
+            // studentId comes from the token, not the body, for security
+            const payload = { ...req.body, studentId: req.user!.studentId! };
+            // issuedById is null because it's a self-checkout online
+            const tx = await transactionService.issue(payload, null as any);
+            sendSuccess(res, tx, 'Book successfully borrowed.', 201);
+        } catch (err) { next(err); }
+    };
+
     return = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
             const result = await transactionService.return(req.body, req.user!.librarianId!);
