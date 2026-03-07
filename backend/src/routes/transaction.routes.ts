@@ -31,11 +31,11 @@ router.post(
     transactionController.borrow,
 );
 
-// ─── POST /api/transactions/return  (librarian only) ──────────────────────
+// ─── POST /api/transactions/return/:transactionId ─────────────────────────
 router.post(
-    '/return',
-    librarianOnly,
-    [body('transactionId').isUUID().withMessage('Valid transaction ID required.')],
+    '/return/:transactionId',
+    anyRole,
+    [param('transactionId').isUUID().withMessage('Valid transaction ID required.')],
     validate,
     transactionController.return,
 );

@@ -94,6 +94,8 @@ export interface IssueBookDTO {
 export interface ReturnBookDTO {
     transactionId: string;
     remarks?: string;
+    waiveFine?: boolean;
+    waiverReason?: string;
 }
 
 // Fines

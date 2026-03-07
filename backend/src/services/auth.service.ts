@@ -209,6 +209,12 @@ export class AuthService {
                 resetPasswordExpiry: expiresInHours(1),
             },
         });
+
+        // Send the password reset email (non-blocking)
+        emailService
+            .sendPasswordReset(user.name, user.email, token)
+            .catch(console.error);
+
         return { token };
     }
 

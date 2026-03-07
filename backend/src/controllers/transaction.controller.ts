@@ -22,10 +22,19 @@ export class TransactionController {
 
     return = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
-            const result = await transactionService.return(req.body, req.user!.librarianId!);
+            const { transactionId } = req.params;
+            const isStudent = req.user!.role === 'STUDENT';
+
+            const result = await transactionService.return(
+                { ...req.body, transactionId },
+                isStudent ? req.user!.userId : req.user!.librarianId!,
+                isStudent
+            );
+
             const msg = result.fine
-                ? `Book returned. Fine of ₹${result.fine.totalAmount} applied for ${result.daysOverdue} overdue day(s).`
+                ? `Book returned. Fine of ₹${result.fine.totalAmount} ${result.fine.status === 'WAIVED' ? 'was waived' : 'applied'}.`
                 : 'Book returned successfully. No fine applied.';
+
             sendSuccess(res, result, msg);
         } catch (err) { next(err); }
     };

@@ -2,6 +2,7 @@ import { prisma } from '../config/database';
 import { AppError } from '../utils/AppError';
 import { TransactionStatus } from '../types';
 import type { IssueBookDTO, ReturnBookDTO } from '../types';
+import { format } from 'date-fns';
 
 const MAX_BORROW_LIMIT = Number(process.env.MAX_BORROW_LIMIT) || 3;
 const LOAN_DAYS = 14; // default loan period
@@ -91,10 +92,14 @@ export class TransactionService {
     }
 
     // ── Return Book ───────────────────────────────────────────────────────────
-    async return(dto: ReturnBookDTO, returnedById: string) {
+    async return(dto: ReturnBookDTO, returnedById: string | null, isStudentInitiated: boolean = false) {
         const transaction = await prisma.transaction.findUnique({
             where: { id: dto.transactionId },
-            include: { book: true, student: true, fine: true },
+            include: {
+                book: true,
+                student: { include: { user: { select: { name: true, email: true } } } },
+                fine: true
+            },
         });
 
         if (!transaction) throw AppError.notFound('Transaction not found.');
@@ -102,11 +107,16 @@ export class TransactionService {
             throw AppError.badRequest('Book has already been returned.');
         }
 
+        // Security check: Students can only return their own books
+        if (isStudentInitiated && transaction.student.userId !== returnedById) {
+            throw AppError.forbidden('You can only return your own borrowed books.');
+        }
+
         const returnDate = new Date();
         const isOverdue = returnDate > transaction.dueDate;
 
         // Calculate fine if overdue
-        let fine = null;
+        let fineData = null;
         if (isOverdue) {
             const daysOverdue = Math.ceil(
                 (returnDate.getTime() - transaction.dueDate.getTime()) / (1000 * 60 * 60 * 24)
@@ -114,30 +124,32 @@ export class TransactionService {
             const ratePerDay = Number(process.env.FINE_PER_DAY) || 2;
             const totalAmount = daysOverdue * ratePerDay;
 
-            fine = await prisma.fine.upsert({
-                where: { transactionId: dto.transactionId },
-                update: { daysOverdue, totalAmount },
-                create: {
-                    transactionId: dto.transactionId,
-                    studentId: transaction.studentId,
-                    daysOverdue,
-                    ratePerDay,
-                    totalAmount,
-                    status: 'PENDING',
-                },
-            });
+            const isWaived = dto.waiveFine && !isStudentInitiated; // Only librarians can waive
+
+            fineData = {
+                transactionId: dto.transactionId,
+                studentId: transaction.studentId,
+                daysOverdue,
+                ratePerDay,
+                totalAmount,
+                status: isWaived ? 'WAIVED' : 'PENDING',
+                waivedById: isWaived ? returnedById : null,
+                waivedAt: isWaived ? returnDate : null,
+                waiverReason: isWaived ? dto.waiverReason : null,
+            };
         }
 
-        // Atomic update: transaction + book + student + account
-        await prisma.$transaction([
+        // Atomic update: transaction + book + student + account + fine
+        const [updatedTx] = await prisma.$transaction([
             prisma.transaction.update({
                 where: { id: dto.transactionId },
                 data: {
                     status: TransactionStatus.RETURNED,
                     returnDate,
-                    returnedById,
+                    returnedById: isStudentInitiated ? null : returnedById,
                     remarks: dto.remarks,
                 },
+                include: { book: true, student: { include: { user: true } } }
             }),
             prisma.book.update({
                 where: { id: transaction.bookId },
@@ -155,15 +167,68 @@ export class TransactionService {
                 data: {
                     totalReturned: { increment: 1 },
                     currentlyBorrowed: { decrement: 1 },
-                    ...(fine ? {
-                        totalFineAccrued: { increment: fine.totalAmount },
-                        outstandingFine: { increment: fine.totalAmount },
+                    ...(fineData && fineData.status !== 'WAIVED' ? {
+                        totalFineAccrued: { increment: fineData.totalAmount },
+                        outstandingFine: { increment: fineData.totalAmount },
                     } : {}),
                 },
             }),
+            ...(fineData ? [
+                prisma.fine.upsert({
+                    where: { transactionId: dto.transactionId },
+                    update: {
+                        daysOverdue: fineData.daysOverdue,
+                        totalAmount: fineData.totalAmount,
+                        status: fineData.status as any,
+                        waivedById: fineData.waivedById,
+                        waivedAt: fineData.waivedAt,
+                        waiverReason: fineData.waiverReason,
+                    },
+                    create: fineData as any,
+                })
+            ] : []),
         ]);
 
-        return { transaction, fine, daysOverdue: fine?.daysOverdue ?? 0 };
+        // ── Send Confirmation Email ──────────────────────────────────────────
+        try {
+            const { getTransporter, FROM_ADDRESS } = await import('../config/mailer');
+            const mailer = getTransporter();
+            const studentEmail = transaction.student.user.email;
+            const studentName = transaction.student.user.name;
+
+            const fineMsg = fineData
+                ? fineData.status === 'WAIVED'
+                    ? `<p style="color: #059669; font-weight: bold;">Overdue fine of ₹${fineData.totalAmount} was waived by the librarian.</p>`
+                    : `<p style="color: #dc2626; font-weight: bold;">An overdue fine of ₹${fineData.totalAmount} has been added to your account.</p>`
+                : '<p style="color: #059669; font-weight: bold;">Returned on time. No fines applied.</p>';
+
+            await mailer.sendMail({
+                from: FROM_ADDRESS,
+                to: studentEmail,
+                subject: `Book Returned: ${transaction.book.title}`,
+                html: `
+                    <div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px;">
+                        <h2 style="color: #1e3a8a;">Digital Library Management System</h2>
+                        <p>Hi ${studentName},</p>
+                        <p>The following book has been successfully returned to the library:</p>
+                        <div style="background: #f3f4f6; padding: 16px; border-radius: 8px; margin: 16px 0;">
+                            <strong style="font-size: 18px;">${transaction.book.title}</strong><br/>
+                            <span style="color: #4b5563;">by ${transaction.book.author}</span>
+                        </div>
+                        <p><strong>Return Date:</strong> ${format(returnDate, 'PPP')}</p>
+                        ${fineMsg}
+                        <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
+                        <p style="font-size: 12px; color: #6b7280; text-align: center;">
+                            Thank you for using DLMS. Please return your books on time to keep the library moving!
+                        </p>
+                    </div>
+                `
+            });
+        } catch (emailErr) {
+            console.error('Failed to send return confirmation email:', emailErr);
+        }
+
+        return { transaction: updatedTx, fine: fineData, daysOverdue: fineData?.daysOverdue ?? 0 };
     }
 
     // ── History ───────────────────────────────────────────────────────────────
@@ -180,6 +245,7 @@ export class TransactionService {
             if (!student) throw AppError.notFound('Student profile not found.');
             where.studentId = student.id;
         }
+        // Librarians see all by default
 
         if (query.status) where.status = query.status;
         if (query.studentId && role === 'LIBRARIAN') where.studentId = query.studentId;
