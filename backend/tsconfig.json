@@ -16,6 +16,10 @@
         "declarationMap": true,
         "sourceMap": true,
         "baseUrl": "./src",
+        "moduleResolution": "node",
+        "types": [
+            "node"
+        ],
         "paths": {
             "@/*": [
                 "./*"
