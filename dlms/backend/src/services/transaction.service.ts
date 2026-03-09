@@ -197,7 +197,10 @@ export class TransactionService {
                 studentEmail: transaction.student.user.email,
                 bookTitle: transaction.book.title,
                 bookAuthor: transaction.book.author,
-                dueDate: format(transaction.dueDate, 'PPP'),
+                isbn: transaction.book.isbn,
+                issueDate: new Date(), // using current date since return date
+                transactionId: transaction.id,
+                dueDate: transaction.dueDate,
             });
         } catch (emailErr) {
             console.error('Failed to send return confirmation email:', emailErr);
