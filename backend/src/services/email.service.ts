@@ -1,4 +1,4 @@
-import { getResendClient, FROM_ADDRESS } from '../config/mailer';
+import { getTransporter, FROM_ADDRESS } from '../config/mailer';
 import {
     emailVerificationTemplate,
     bookIssuedTemplate,
@@ -15,18 +15,13 @@ import {
 // ─────────────────────────────────────────────────────────────
 async function send(to: string, subject: string, html: string): Promise<void> {
     try {
-        const { data, error } = await getResendClient().emails.send({
+        await getTransporter().sendMail({
             from: FROM_ADDRESS,
             to,
             subject,
             html,
         });
-
-        if (error) {
-            console.error(`❌ Resend API Error sending to ${to}:`, error);
-        } else {
-            console.log(`📧 Email sent to ${to} — "${subject}" | ID: ${data?.id}`);
-        }
+        console.log(`📧 Email sent to ${to} — "${subject}"`);
     } catch (err) {
         // Log but don't crash the caller — email is non-critical
         console.error(`❌ Failed to send email to ${to}:`, err);
