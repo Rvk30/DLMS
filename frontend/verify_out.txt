@@ -1,0 +1,11 @@
+🚀 Starting Frontend Verification...
+-----------------------------------------
+✅ [200] /
+✅ [200] /login
+✅ [200] /register
+✅ [200] /dashboard
+✅ [200] /search
+✅ [200] /fines
+✅ [200] /transactions
+-----------------------------------------
+🏁 All frontend routes rendered successfully.
