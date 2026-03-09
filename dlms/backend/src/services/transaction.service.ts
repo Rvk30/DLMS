@@ -191,43 +191,17 @@ export class TransactionService {
 
         // ── Send Confirmation Email ──────────────────────────────────────────
         try {
-            const { getTransporter, FROM_ADDRESS } = await import('../config/mailer');
-            const mailer = getTransporter();
-            const studentEmail = transaction.student.user.email;
-            const studentName = transaction.student.user.name;
-
-            const fineMsg = fineData
-                ? fineData.status === 'WAIVED'
-                    ? `<p style="color: #059669; font-weight: bold;">Overdue fine of ₹${fineData.totalAmount} was waived by the librarian.</p>`
-                    : `<p style="color: #dc2626; font-weight: bold;">An overdue fine of ₹${fineData.totalAmount} has been added to your account.</p>`
-                : '<p style="color: #059669; font-weight: bold;">Returned on time. No fines applied.</p>';
-
-            await mailer.sendMail({
-                from: FROM_ADDRESS,
-                to: studentEmail,
-                subject: `Book Returned: ${transaction.book.title}`,
-                html: `
-                    <div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px;">
-                        <h2 style="color: #1e3a8a;">Digital Library Management System</h2>
-                        <p>Hi ${studentName},</p>
-                        <p>The following book has been successfully returned to the library:</p>
-                        <div style="background: #f3f4f6; padding: 16px; border-radius: 8px; margin: 16px 0;">
-                            <strong style="font-size: 18px;">${transaction.book.title}</strong><br/>
-                            <span style="color: #4b5563;">by ${transaction.book.author}</span>
-                        </div>
-                        <p><strong>Return Date:</strong> ${format(returnDate, 'PPP')}</p>
-                        ${fineMsg}
-                        <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
-                        <p style="font-size: 12px; color: #6b7280; text-align: center;">
-                            Thank you for using DLMS. Please return your books on time to keep the library moving!
-                        </p>
-                    </div>
-                `
+            const { emailService } = await import('./email.service');
+            await emailService.sendBookIssued({
+                studentName: transaction.student.user.name,
+                studentEmail: transaction.student.user.email,
+                bookTitle: transaction.book.title,
+                bookAuthor: transaction.book.author,
+                dueDate: format(transaction.dueDate, 'PPP'),
             });
         } catch (emailErr) {
             console.error('Failed to send return confirmation email:', emailErr);
         }
-
         return { transaction: updatedTx, fine: fineData, daysOverdue: fineData?.daysOverdue ?? 0 };
     }
 
