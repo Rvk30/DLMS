@@ -17,8 +17,5 @@
     },
     "devDependencies": {
         "concurrently": "^8.2.2"
-    },
-    "dependencies": {
-        "nodemailer": "^8.0.1"
     }
 }
